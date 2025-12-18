@@ -3,11 +3,6 @@ const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
-const user = process.env.MONGO_USER;
-const password = encodeURIComponent(process.env.MONGO_PASSWORD);
-
-const uri = `mongodb+srv://${user}:${password}@${process.env.MONGO_CLUSTER}/${process.env.MONGO_DB}?appName=Cluster0`;
-
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -15,8 +10,12 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.send("Hello World!");
+  res.send("Server running");
 });
+
+const uri = `mongodb+srv://${process.env.MONGO_USER}:${encodeURIComponent(
+  process.env.MONGO_PASSWORD
+)}@${process.env.MONGO_CLUSTER}/${process.env.MONGO_DB}?appName=Cluster0`;
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -27,77 +26,80 @@ const client = new MongoClient(uri, {
 });
 
 async function run() {
-  try {
-    await client.connect();
+  await client.connect();
+  const db = client.db(process.env.MONGO_DB);
+  const usersCollection = db.collection("users");
 
-    const db = client.db(process.env.MONGO_DB);
-    const usersCollection = db.collection("users");
+  // REGISTER USER (HR / EMPLOYEE)
+  app.post("/users/register", async (req, res) => {
+    const {
+      uid,
+      name,
+      email,
+      dateOfBirth,
+      role,
+      companyName,
+      companyLogo,
+      packageLimit,
+      currentEmployees,
+      subscription,
+    } = req.body;
 
-    // GET users (optional)
-    app.get("/users", async (req, res) => {
-      const users = await usersCollection.find().toArray();
-      res.send(users);
-    });
+    if (!uid || !name || !email || !dateOfBirth || !role) {
+      return res.status(400).send({ message: "Required fields missing" });
+    }
 
-    // Register (HR / Employee) -> upsert by email
-    app.post("/users/register", async (req, res) => {
-      const {
-        name,
-        companyName,
-        companyLogo,
-        email,
-        password,
-        dateOfBirth,
-        role,
-        packageLimit,
-        currentEmployees,
-        subscription,
-      } = req.body;
+    if (role === "hr" && (!companyName || !companyLogo)) {
+      return res
+        .status(400)
+        .send({ message: "Company info required for HR" });
+    }
 
-      // Basic required fields (company fields only required for HR)
-      if (!email || !password || !dateOfBirth || !role || !name) {
-        return res.status(400).send({ message: "required fields missing" });
-      }
+    const payload = {
+      uid,
+      name,
+      email,
+      dateOfBirth,
+      role,
+      companyName: role === "hr" ? companyName : undefined,
+      companyLogo: role === "hr" ? companyLogo : undefined,
+      packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
+      currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
+      subscription: role === "hr" ? subscription ?? "basic" : undefined,
+      createdAt: new Date(),
+    };
 
-      if (role === "hr") {
-        if (!companyName || !companyLogo) {
-          return res
-            .status(400)
-            .send({ message: "companyName and companyLogo are required for HR" });
-        }
-      }
+    await usersCollection.updateOne(
+      { uid },
+      { $set: payload },
+      { upsert: true }
+    );
 
-      const payload = {
-        name,
-        email,
-        password,
-        dateOfBirth,
-        role,
-        companyName: role==="hr" ? companyName || "":undefined,
-        companyLogo: role==="hr"?  companyLogo || "":undefined,
-        packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
-        currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
-        subscription: role === "hr" ? subscription || "basic" : undefined,
-      };
+    res.send({ message: "User registered successfully" });
+  });
 
-      await usersCollection.updateOne(
-        { email },
-        { $set: payload, $setOnInsert: { createdAt: new Date() } },
-        { upsert: true }
-      );
+  // GET CURRENT USER BY UID (LOGIN USES THIS)
+  app.get("/users/me", async (req, res) => {
+    const { uid } = req.query;
 
-      res.send({ message: "User registered successfully" });
-    });
+    if (!uid) {
+      return res.status(400).send({ message: "uid is required" });
+    }
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-    // do not close client; keep server running
-  }
+    const user = await usersCollection.findOne({ uid });
+
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+
+    res.send(user); // includes role
+  });
+
+  console.log("MongoDB connected");
 }
 
 run().catch(console.dir);
 
 app.listen(port, () => {
-  console.log(`assetverse is running on port,${port}`);
+  console.log(`Server running on port ${port}`);
 });
