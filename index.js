@@ -1,7 +1,9 @@
+
+
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -9,9 +11,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("Server running");
-});
+app.get("/", (req, res) => res.send("Server running"));
 
 const uri = `mongodb+srv://${process.env.MONGO_USER}:${encodeURIComponent(
   process.env.MONGO_PASSWORD
@@ -29,79 +29,214 @@ async function run() {
   await client.connect();
 
   const db = client.db(process.env.MONGO_DB);
+
+  // Collections
   const usersCollection = db.collection("users");
-  const assetsCollection = db.collection("assets"); // ✅ FIX: define assetsCollection
+  const assetsCollection = db.collection("assets");
+  const employeeCompanyCollection = db.collection("employeeCompany");
+  const requestsCollection = db.collection("requests"); // NEW
 
-  // REGISTER USER (HR / EMPLOYEE)
+  // ==========================================================
+  // USERS (Register/Login role data)
+  // ==========================================================
+
   app.post("/users/register", async (req, res) => {
-    const {
-      uid,
-      name,
-      email,
-      dateOfBirth,
-      role,
-      companyName,
-      companyLogo,
-      packageLimit,
-      currentEmployees,
-      subscription,
-    } = req.body;
+    try {
+      const {
+        uid,
+        name,
+        email,
+        dateOfBirth,
+        role,
+        companyName,
+        companyLogo,
+        packageLimit,
+        currentEmployees,
+        subscription,
+      } = req.body;
 
-    if (!uid || !name || !email || !dateOfBirth || !role) {
-      return res.status(400).send({ message: "Required fields missing" });
+      if (!uid || !name || !email || !dateOfBirth || !role) {
+        return res.status(400).send({ message: "Required fields missing" });
+      }
+
+      if (role === "hr" && (!companyName || !companyLogo)) {
+        return res
+          .status(400)
+          .send({ message: "Company info required for HR" });
+      }
+
+      const payload = {
+        uid,
+        name,
+        email,
+        dateOfBirth,
+        role,
+
+        // HR-only
+        companyName: role === "hr" ? companyName : undefined,
+        companyLogo: role === "hr" ? companyLogo : undefined,
+        packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
+        currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
+        subscription: role === "hr" ? subscription ?? "basic" : undefined,
+
+        createdAt: new Date(),
+      };
+
+      await usersCollection.updateOne(
+        { uid },
+        { $set: payload },
+        { upsert: true }
+      );
+
+      res.send({ message: "User registered successfully" });
+    } catch (err) {
+      console.error("POST /users/register error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
     }
-
-    if (role === "hr" && (!companyName || !companyLogo)) {
-      return res
-        .status(400)
-        .send({ message: "Company info required for HR" });
-    }
-
-    const payload = {
-      uid,
-      name,
-      email,
-      dateOfBirth,
-      role,
-      companyName: role === "hr" ? companyName : undefined,
-      companyLogo: role === "hr" ? companyLogo : undefined,
-      packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
-      currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
-      subscription: role === "hr" ? subscription ?? "basic" : undefined,
-      createdAt: new Date(),
-    };
-
-    await usersCollection.updateOne(
-      { uid },
-      { $set: payload },
-      { upsert: true }
-    );
-
-    res.send({ message: "User registered successfully" });
   });
 
-  // GET CURRENT USER BY UID (LOGIN USES THIS)
   app.get("/users/me", async (req, res) => {
-    const { uid } = req.query;
+    try {
+      const { uid } = req.query;
+      if (!uid) return res.status(400).send({ message: "uid is required" });
 
-    if (!uid) {
-      return res.status(400).send({ message: "uid is required" });
+      const user = await usersCollection.findOne({ uid });
+      if (!user) return res.status(404).send({ message: "User not found" });
+
+      res.send(user);
+    } catch (err) {
+      console.error("GET /users/me error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
     }
-
-    const user = await usersCollection.findOne({ uid });
-
-    if (!user) {
-      return res.status(404).send({ message: "User not found" });
-    }
-
-    res.send(user);
   });
 
-  // POST /assets (fixed for your current frontend payload)
+  // Returns all users (projection only companyName)
+  app.get("/users/list", async (req, res) => {
+    try {
+      const list = await usersCollection
+        .find({}, { projection: { companyName: 1 } })
+        .toArray();
+      res.json(list);
+    } catch (err) {
+      console.error("GET /users/list error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  app.get("/users", async (req, res) => {
+    try {
+      const { uid } = req.query;
+      if (!uid) return res.status(400).send({ message: "uid is required" });
+
+      const user = await usersCollection.findOne({ uid });
+      if (!user) return res.status(404).send({ message: "User not found" });
+
+      res.send(user);
+    } catch (err) {
+      console.error("GET /users error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // ==========================================================
+  // EMPLOYEE FIRST LOGIN SUPPORT
+  // ==========================================================
+
+  // Employee dropdown: show ONLY HR companies
+  app.get("/companies/list", async (req, res) => {
+    try {
+      const list = await usersCollection
+        .find(
+          { role: "hr" },
+          { projection: { companyName: 1, companyLogo: 1 } }
+        )
+        .toArray();
+
+      res.json(list);
+    } catch (err) {
+      console.error("GET /companies/list error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // Check if employee already affiliated
+  app.get("/employee-company", async (req, res) => {
+    try {
+      const { employeeUid } = req.query;
+      if (!employeeUid) {
+        return res.status(400).json({ message: "employeeUid is required" });
+      }
+
+      const record = await employeeCompanyCollection.findOne({ employeeUid });
+      if (!record) {
+        return res.status(404).json({ message: "No company yet" });
+      }
+
+      res.json(record); // { employeeUid, companyId, joinedAt }
+    } catch (err) {
+      console.error("GET /employee-company error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // NEW: persist employee affiliation when employee selects a company
+  // Body: { employeeUid, companyId }
+  app.post("/employee-company", async (req, res) => {
+    try {
+      const { employeeUid, companyId } = req.body;
+
+      if (!employeeUid || !companyId) {
+        return res
+          .status(400)
+          .json({ message: "employeeUid and companyId are required" });
+      }
+
+      // Validate companyId is a valid ObjectId and exists as an HR user
+      let companyObjectId;
+      try {
+        companyObjectId = new ObjectId(companyId);
+      } catch {
+        return res.status(400).json({ message: "Invalid companyId" });
+      }
+
+      const hrCompany = await usersCollection.findOne({
+        _id: companyObjectId,
+        role: "hr",
+      });
+
+      if (!hrCompany) {
+        return res.status(404).json({ message: "Company (HR) not found" });
+      }
+
+      // Upsert: employee can only have 1 company in this model
+      await employeeCompanyCollection.updateOne(
+        { employeeUid },
+        {
+          $set: {
+            employeeUid,
+            companyId: companyObjectId,
+            joinedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+
+      res.json({ message: "Employee company saved", companyId });
+    } catch (err) {
+      console.error("POST /employee-company error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // ==========================================================
+  // ASSETS (HR CRUD) + (Employee view by company)
+  // ==========================================================
+
+  // HR adds asset (companyId = HR user's _id)
   app.post("/assets", async (req, res) => {
     try {
       const hrUid = req.body.hrUid || req.body.hruid; // accept both keys
-      const { name, type, quantity, image } = req.body; // ✅ include image
+      const { name, type, quantity, image } = req.body;
 
       if (!hrUid || !name || quantity === undefined) {
         return res
@@ -115,18 +250,216 @@ async function run() {
         return res.status(403).json({ message: "Only HR can add assets" });
 
       await assetsCollection.insertOne({
-        companyId: hrUser._id,
+        companyId: hrUser._id, // company = HR user's _id
         hrUid: hrUser.uid,
         name,
         type: type || "general",
         quantity: Number(quantity),
-        image, // ✅ store image url sent from frontend
+        image,
         createdAt: new Date(),
       });
 
       res.json({ message: "Asset added" });
     } catch (err) {
       console.error("POST /assets error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // HR lists assets of their own company
+  // GET /assets?uid=HR_UID
+  app.get("/assets", async (req, res) => {
+    try {
+      const { uid } = req.query;
+      if (!uid) return res.status(400).json({ message: "uid is required" });
+
+      const user = await usersCollection.findOne({ uid });
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const list = await assetsCollection.find({ companyId: user._id }).toArray();
+      res.json(list);
+    } catch (err) {
+      console.error("GET /assets error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // Employee loads assets (query version)
+  // GET /assets/by-company?companyId=xxx
+  app.get("/assets/by-company", async (req, res) => {
+    try {
+      const { companyId } = req.query;
+      if (!companyId) {
+        return res.status(400).json({ message: "companyId is required" });
+      }
+
+      const list = await assetsCollection
+        .find({ companyId: new ObjectId(companyId) })
+        .toArray();
+
+      res.json(list);
+    } catch (err) {
+      console.error("GET /assets/by-company error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // Employee loads assets (param version) - FIXED (no double slash)
+  // GET /assets/:companyId
+  app.get("/assets/:companyId", async (req, res) => {
+    try {
+      const { companyId } = req.params;
+
+      if (!companyId) {
+        return res.status(400).json({ message: "companyId is required" });
+      }
+
+      const companyObjectId = new ObjectId(companyId);
+
+      const assets = await assetsCollection
+        .find({ companyId: companyObjectId })
+        .toArray();
+
+      res.json(assets);
+    } catch (err) {
+      console.error("GET /assets/:companyId error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // DELETE /assets/:id?uid=HR_UID
+  app.delete("/assets/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { uid } = req.query;
+
+      if (!uid) return res.status(400).json({ message: "uid is required" });
+
+      const asset = await assetsCollection.findOne({ _id: new ObjectId(id) });
+      if (!asset) return res.status(404).json({ message: "Asset not found" });
+
+      if (asset.hrUid !== uid) {
+        return res.status(403).json({ message: "Not allowed" });
+      }
+
+      await assetsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.json({ message: "Asset deleted" });
+    } catch (err) {
+      console.error("DELETE /assets/:id error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // PATCH /assets/:id?uid=HR_UID
+  app.patch("/assets/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { uid } = req.query;
+      const { name, type, quantity, image } = req.body;
+
+      if (!uid) return res.status(400).json({ message: "uid is required" });
+
+      const asset = await assetsCollection.findOne({ _id: new ObjectId(id) });
+      if (!asset) return res.status(404).json({ message: "Asset not found" });
+
+      if (asset.hrUid !== uid) {
+        return res.status(403).json({ message: "Not allowed" });
+      }
+
+      if (quantity !== undefined && Number(quantity) > 15) {
+        return res
+          .status(400)
+          .json({ message: "Quantity cannot be more than 15" });
+      }
+
+      const updateDoc = {};
+      if (name !== undefined) updateDoc.name = name;
+      if (type !== undefined) updateDoc.type = type;
+      if (quantity !== undefined) updateDoc.quantity = Number(quantity);
+      if (image !== undefined) updateDoc.image = image;
+
+      await assetsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updateDoc }
+      );
+
+      res.json({ message: "Asset updated" });
+    } catch (err) {
+      console.error("PATCH /assets/:id error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // ==========================================================
+  // REQUESTS (Employee -> HR)
+  // ==========================================================
+
+  // Frontend calls POST http://localhost:3000/requests
+  // Body: { employeeUid, employeeEmail, companyId, assetId }
+  app.post("/requests", async (req, res) => {
+    try {
+      const { employeeUid, employeeEmail, companyId, assetId } = req.body;
+
+      if (!employeeUid || !employeeEmail || !companyId || !assetId) {
+        return res.status(400).json({
+          message: "employeeUid, employeeEmail, companyId, assetId are required",
+        });
+      }
+
+      const companyObjectId = new ObjectId(companyId);
+      const assetObjectId = new ObjectId(assetId);
+
+      // Optional: validate asset belongs to company
+      const asset = await assetsCollection.findOne({ _id: assetObjectId });
+      if (!asset) return res.status(404).json({ message: "Asset not found" });
+
+      if (String(asset.companyId) !== String(companyObjectId)) {
+        return res
+          .status(400)
+          .json({ message: "Asset does not belong to this company" });
+      }
+
+      // Optional: block if out of stock
+      if (Number(asset.quantity) <= 0) {
+        return res.status(400).json({ message: "Asset out of stock" });
+      }
+
+      // Create request
+      const doc = {
+        employeeUid,
+        employeeEmail,
+        companyId: companyObjectId,
+        assetId: assetObjectId,
+        status: "pending",
+        createdAt: new Date(),
+      };
+
+      const result = await requestsCollection.insertOne(doc);
+
+      res.json({ message: "Request created", requestId: result.insertedId });
+    } catch (err) {
+      console.error("POST /requests error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
+
+  // Optional: HR fetch requests by company
+  // GET /requests?companyId=...
+  app.get("/requests", async (req, res) => {
+    try {
+      const { companyId } = req.query;
+      if (!companyId) {
+        return res.status(400).json({ message: "companyId is required" });
+      }
+
+      const list = await requestsCollection
+        .find({ companyId: new ObjectId(companyId) })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(list);
+    } catch (err) {
+      console.error("GET /requests error:", err);
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
