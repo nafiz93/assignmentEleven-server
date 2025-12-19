@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const { MongoClient, ServerApiVersion } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -27,8 +27,10 @@ const client = new MongoClient(uri, {
 
 async function run() {
   await client.connect();
+
   const db = client.db(process.env.MONGO_DB);
   const usersCollection = db.collection("users");
+  const assetsCollection = db.collection("assets"); // ✅ FIX: define assetsCollection
 
   // REGISTER USER (HR / EMPLOYEE)
   app.post("/users/register", async (req, res) => {
@@ -92,7 +94,41 @@ async function run() {
       return res.status(404).send({ message: "User not found" });
     }
 
-    res.send(user); // includes role
+    res.send(user);
+  });
+
+  // POST /assets (fixed for your current frontend payload)
+  app.post("/assets", async (req, res) => {
+    try {
+      const hrUid = req.body.hrUid || req.body.hruid; // accept both keys
+      const { name, type, quantity, image } = req.body; // ✅ include image
+
+      if (!hrUid || !name || quantity === undefined) {
+        return res
+          .status(400)
+          .json({ message: "hrUid/hruid, name, quantity are required" });
+      }
+
+      const hrUser = await usersCollection.findOne({ uid: hrUid });
+      if (!hrUser) return res.status(404).json({ message: "HR user not found" });
+      if (hrUser.role !== "hr")
+        return res.status(403).json({ message: "Only HR can add assets" });
+
+      await assetsCollection.insertOne({
+        companyId: hrUser._id,
+        hrUid: hrUser.uid,
+        name,
+        type: type || "general",
+        quantity: Number(quantity),
+        image, // ✅ store image url sent from frontend
+        createdAt: new Date(),
+      });
+
+      res.json({ message: "Asset added" });
+    } catch (err) {
+      console.error("POST /assets error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
   });
 
   console.log("MongoDB connected");
