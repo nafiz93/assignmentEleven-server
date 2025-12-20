@@ -120,6 +120,7 @@ async function run() {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
+
   //*******************************approve all API is here ******************************************
   app.get("/users", async (req, res) => {
     try {
@@ -139,25 +140,34 @@ async function run() {
   app.patch("/requests/:requestId/approve", async (req, res) => {
     try {
       const { requestId } = req.params;
-      const { userId } = req.body;
+      const { userId } = req.body; // Firebase UID of HR
 
       if (!requestId)
-        return res.status(404).send({ message: "request id is required" });
+        return res.status(400).send({ message: "request id is required" });
       if (!userId)
-        return res.status(404).send({ message: "user ID is required" });
+        return res.status(400).send({ message: "user ID is required" });
+
+      // Validate requestId ObjectId
+      let requestObjectId;
+      try {
+        requestObjectId = new ObjectId(requestId);
+      } catch {
+        return res.status(400).json({ message: "Invalid requestId" });
+      }
 
       const hrUser = await usersCollection.findOne({ uid: userId });
-      if (!hrUser) return res.status(400).json({ message: "HR nor found" });
+      if (!hrUser) return res.status(400).json({ message: "HR not found" });
       if (hrUser.role !== "hr")
         return res.status(400).json({ message: "not HR" });
 
+      // IMPORTANT FIX: companyId must be HR user's Mongo _id, not Firebase UID
       const requestDoc = await requestsCollection.findOne({
-        _id: new ObjectId(requestId),
-        companyId: new ObjectId(userId),
+        _id: requestObjectId,
+        companyId: hrUser._id,
       });
 
       if (!requestDoc)
-        return res.status(404).send({ message: "requst not found" });
+        return res.status(404).send({ message: "request not found" });
 
       if (requestDoc.status !== "pending") {
         return res
@@ -167,7 +177,7 @@ async function run() {
 
       const asset = await assetsCollection.findOne({
         _id: new ObjectId(requestDoc.assetId),
-        companyId: new ObjectId(userId),
+        companyId: hrUser._id,
       });
 
       if (!asset) {
@@ -178,7 +188,7 @@ async function run() {
         return res.status(400).json({ message: "item is out of stock" });
 
       const exist = await employeeCompanyCollection.findOne({
-        companyId: new ObjectId(userId),
+        companyId: hrUser._id,
         employeeUid: requestDoc.employeeUid,
       });
 
@@ -192,26 +202,30 @@ async function run() {
 
         await employeeCompanyCollection.insertOne({
           companyId: hrUser._id,
-          employeeUid: reqDoc.employeeUid,
+          employeeUid: requestDoc.employeeUid, // FIX: requestDoc not reqDoc
           joinedAt: new Date(),
         });
+
         await usersCollection.updateOne(
           { _id: hrUser._id },
           { $inc: { currentEmployees: 1 } }
         );
       }
+
       // 8) reduce asset qty
       await assetsCollection.updateOne(
         { _id: asset._id },
         { $inc: { quantity: -1 } }
       );
+
       // 9) approve request
       await requestsCollection.updateOne(
-        { _id: reqDoc._id },
+        { _id: requestDoc._id }, // FIX: requestDoc not reqDoc
         { $set: { status: "approved", approvedAt: new Date() } }
       );
+
       res.json({
-        message: exits ? "Approved (old employee)" : "Approved (new employee)",
+        message: exist ? "Approved (old employee)" : "Approved (new employee)", // FIX: exist not exits
       });
     } catch (err) {
       console.error("error is here", err);
@@ -220,22 +234,21 @@ async function run() {
   });
 
   // PATCH /requests/:requestId/reject
-// Purpose: HR rejects request (only status update)
-app.patch("/requests/:requestId/reject", async (req, res) => {
-  try {
-    const { requestId } = req.params;
+  // Purpose: HR rejects request (only status update)
+  app.patch("/requests/:requestId/reject", async (req, res) => {
+    try {
+      const { requestId } = req.params;
 
-    await requestsCollection.updateOne(
-      { _id: new ObjectId(requestId) },
-      { $set: { status: "rejected", rejectedAt: new Date() } }
-    );
+      await requestsCollection.updateOne(
+        { _id: new ObjectId(requestId) },
+        { $set: { status: "rejected", rejectedAt: new Date() } }
+      );
 
-    res.json({ message: "Rejected" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
+      res.json({ message: "Rejected" });
+    } catch (err) {
+      res.status(500).json({ message: "Server error" });
+    }
+  });
 
   //******************************approve************************************************ */
   // ==========================================================
@@ -567,8 +580,6 @@ app.patch("/requests/:requestId/reject", async (req, res) => {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
-
-  //set the approve function
 
   console.log("MongoDB connected");
 }
