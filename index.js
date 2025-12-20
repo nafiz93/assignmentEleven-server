@@ -1,5 +1,3 @@
-
-
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
@@ -122,7 +120,7 @@ async function run() {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
-
+  //*******************************approve all API is here ******************************************
   app.get("/users", async (req, res) => {
     try {
       const { uid } = req.query;
@@ -138,6 +136,54 @@ async function run() {
     }
   });
 
+  app.patch("/requests/:requestId/approve", async (req, res) => {
+    try {
+      const { requestId } = req.params;
+      const { hrId } = req.body;
+      if (!requestId)
+        return res.status(404).send({ message: "request id is required" });
+      if (!hrId) return res.status(404).send({ message: "HR ID is required" });
+      const requestDoc = await requestsCollection.findOne({
+        _id: new ObjectId(requestId),
+        companyId: new ObjectId(hrId),
+      });
+
+      if (!requestDoc)
+        return res.status(404).send({ message: "requst not found" });
+
+      if (requestDoc.status !== "pending") {
+        return res
+          .status(400)
+          .json({ message: `request already ${requestDoc.status}` });
+      }
+
+      const asset=await assetsCollection.findOne({
+         _id: new ObjectId(requestDoc.assetId),
+        companyId: new ObjectId(hrId),
+      })
+
+      if(!asset){
+        return res.status(404).json({message:'asset not found'})
+      }
+
+      if(asset.quantity<=0) return res.status(400).json({message:'item is out of stock'})
+
+        const exist=await employeeCompanyCollection.findOne({
+
+           companyId: new ObjectId(hrId),
+           employeeUid: requestDoc.employeeUid
+        })
+
+        if(!exist){
+          console.log('this employee already affilliated')
+        }
+    } catch (err) {
+      console.error("error is here", err);
+      res.status(500).json({ message: "internal server error" });
+    }
+  });
+
+  //******************************approve************************************************ */
   // ==========================================================
   // EMPLOYEE FIRST LOGIN SUPPORT
   // ==========================================================
@@ -245,7 +291,8 @@ async function run() {
       }
 
       const hrUser = await usersCollection.findOne({ uid: hrUid });
-      if (!hrUser) return res.status(404).json({ message: "HR user not found" });
+      if (!hrUser)
+        return res.status(404).json({ message: "HR user not found" });
       if (hrUser.role !== "hr")
         return res.status(403).json({ message: "Only HR can add assets" });
 
@@ -276,7 +323,9 @@ async function run() {
       const user = await usersCollection.findOne({ uid });
       if (!user) return res.status(404).json({ message: "User not found" });
 
-      const list = await assetsCollection.find({ companyId: user._id }).toArray();
+      const list = await assetsCollection
+        .find({ companyId: user._id })
+        .toArray();
       res.json(list);
     } catch (err) {
       console.error("GET /assets error:", err);
@@ -402,7 +451,8 @@ async function run() {
 
       if (!employeeUid || !employeeEmail || !companyId || !assetId) {
         return res.status(400).json({
-          message: "employeeUid, employeeEmail, companyId, assetId are required",
+          message:
+            "employeeUid, employeeEmail, companyId, assetId are required",
         });
       }
 
@@ -463,6 +513,8 @@ async function run() {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
+
+  //set the approve function
 
   console.log("MongoDB connected");
 }
