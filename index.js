@@ -139,13 +139,21 @@ async function run() {
   app.patch("/requests/:requestId/approve", async (req, res) => {
     try {
       const { requestId } = req.params;
-      const { hrId } = req.body;
+      const { userId } = req.body;
+
       if (!requestId)
         return res.status(404).send({ message: "request id is required" });
-      if (!hrId) return res.status(404).send({ message: "HR ID is required" });
+      if (!userId)
+        return res.status(404).send({ message: "user ID is required" });
+
+      const hrUser = await usersCollection.findOne({ uid: userId });
+      if (!hrUser) return res.status(400).json({ message: "HR nor found" });
+      if (hrUser.role !== "hr")
+        return res.status(400).json({ message: "not HR" });
+
       const requestDoc = await requestsCollection.findOne({
         _id: new ObjectId(requestId),
-        companyId: new ObjectId(hrId),
+        companyId: new ObjectId(userId),
       });
 
       if (!requestDoc)
@@ -157,26 +165,54 @@ async function run() {
           .json({ message: `request already ${requestDoc.status}` });
       }
 
-      const asset=await assetsCollection.findOne({
-         _id: new ObjectId(requestDoc.assetId),
-        companyId: new ObjectId(hrId),
-      })
+      const asset = await assetsCollection.findOne({
+        _id: new ObjectId(requestDoc.assetId),
+        companyId: new ObjectId(userId),
+      });
 
-      if(!asset){
-        return res.status(404).json({message:'asset not found'})
+      if (!asset) {
+        return res.status(404).json({ message: "asset not found" });
       }
 
-      if(asset.quantity<=0) return res.status(400).json({message:'item is out of stock'})
+      if (asset.quantity <= 0)
+        return res.status(400).json({ message: "item is out of stock" });
 
-        const exist=await employeeCompanyCollection.findOne({
+      const exist = await employeeCompanyCollection.findOne({
+        companyId: new ObjectId(userId),
+        employeeUid: requestDoc.employeeUid,
+      });
 
-           companyId: new ObjectId(hrId),
-           employeeUid: requestDoc.employeeUid
-        })
+      if (!exist) {
+        const limit = hrUser.packageLimit ?? 5;
+        const current = hrUser.currentEmployees ?? 0;
 
-        if(!exist){
-          console.log('this employee already affilliated')
+        if (current >= limit) {
+          return res.status(400).json({ message: "Employee limit reached" });
         }
+
+        await employeeCompanyCollection.insertOne({
+          companyId: hrUser._id,
+          employeeUid: reqDoc.employeeUid,
+          joinedAt: new Date(),
+        });
+        await usersCollection.updateOne(
+          { _id: hrUser._id },
+          { $inc: { currentEmployees: 1 } }
+        );
+      }
+      // 8) reduce asset qty
+      await assetsCollection.updateOne(
+        { _id: asset._id },
+        { $inc: { quantity: -1 } }
+      );
+      // 9) approve request
+      await requestsCollection.updateOne(
+        { _id: reqDoc._id },
+        { $set: { status: "approved", approvedAt: new Date() } }
+      );
+      res.json({
+        message: exists ? "Approved (old employee)" : "Approved (new employee)",
+      });
     } catch (err) {
       console.error("error is here", err);
       res.status(500).json({ message: "internal server error" });
