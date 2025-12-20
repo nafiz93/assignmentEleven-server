@@ -211,13 +211,31 @@ async function run() {
         { $set: { status: "approved", approvedAt: new Date() } }
       );
       res.json({
-        message: exists ? "Approved (old employee)" : "Approved (new employee)",
+        message: exits ? "Approved (old employee)" : "Approved (new employee)",
       });
     } catch (err) {
       console.error("error is here", err);
       res.status(500).json({ message: "internal server error" });
     }
   });
+
+  // PATCH /requests/:requestId/reject
+// Purpose: HR rejects request (only status update)
+app.patch("/requests/:requestId/reject", async (req, res) => {
+  try {
+    const { requestId } = req.params;
+
+    await requestsCollection.updateOne(
+      { _id: new ObjectId(requestId) },
+      { $set: { status: "rejected", rejectedAt: new Date() } }
+    );
+
+    res.json({ message: "Rejected" });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
   //******************************approve************************************************ */
   // ==========================================================
