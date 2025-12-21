@@ -69,10 +69,11 @@ async function run() {
         email,
         dateOfBirth,
         role,
+        companyLogo,
 
         // HR-only
         companyName: role === "hr" ? companyName : undefined,
-        companyLogo: role === "hr" ? companyLogo : undefined,
+     
         packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
         currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
         subscription: role === "hr" ? subscription ?? "basic" : undefined,
