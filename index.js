@@ -138,6 +138,32 @@ async function run() {
     }
   });
 
+
+  app.patch("/users", async (req, res) => {
+  try {
+    const { uid } = req.query;
+    if (!uid) return res.status(400).json({ message: "uid is required" });
+
+    const { name, email, companyLogo } = req.body;
+
+    const updateDoc = {};
+    if (name !== undefined) updateDoc.name = name;
+    if (email !== undefined) updateDoc.email = email;
+    if (companyLogo !== undefined) updateDoc.companyLogo = companyLogo;
+
+    const result = await usersCollection.updateOne(
+      { uid },
+      { $set: updateDoc }
+    );
+
+    return res.json({ message: "User updated", modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error("PATCH /users error:", err);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+
   app.patch("/requests/:requestId/approve", async (req, res) => {
     try {
       const { requestId } = req.params;
