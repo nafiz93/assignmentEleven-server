@@ -580,6 +580,24 @@ async function run() {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
+  app.get("/requests/myasset", async (req, res) => {
+    try {
+      const { empid } = req.query;
+      if (!empid) {
+        return res.status(400).json({ message: "companyId is required" });
+      }
+
+      const list = await requestsCollection
+        .find({employeeUid:empid})
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.json(list);
+    } catch (err) {
+      console.error("GET /requests error:", err);
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  });
 
   console.log("MongoDB connected");
 }
