@@ -150,7 +150,7 @@ async function run() {
   });
 
   //*******************************approve all API is here ******************************************
-  app.get("/users", async (req, res) => {
+  app.get("/users",verifyFireBaseToken, async (req, res) => {
     try {
       const { uid } = req.query;
       if (!uid) return res.status(400).send({ message: "uid is required" });
@@ -166,7 +166,7 @@ async function run() {
   });
 
 
-  app.patch("/users", async (req, res) => {   
+  app.patch("/users",verifyFireBaseToken, async (req, res) => {   
   try {
     const { uid } = req.query;
     if (!uid) return res.status(400).json({ message: "uid is required" });
@@ -191,7 +191,7 @@ async function run() {
 });
 
 
-  app.patch("/requests/:requestId/approve", async (req, res) => {
+  app.patch("/requests/:requestId/approve",verifyFireBaseToken, async (req, res) => {
     try {
       const { requestId } = req.params;
       const { userId } = req.body; // Firebase UID of HR
@@ -289,7 +289,7 @@ async function run() {
 
   // PATCH /requests/:requestId/reject
   // Purpose: HR rejects request (only status update)
-  app.patch("/requests/:requestId/reject", async (req, res) => {
+  app.patch("/requests/:requestId/reject",verifyFireBaseToken, async (req, res) => {
     try {
       const { requestId } = req.params;
 
@@ -310,7 +310,7 @@ async function run() {
   // ==========================================================
 
   // Employee dropdown: show ONLY HR companies
-  app.get("/companies/list", async (req, res) => {
+  app.get("/companies/list",verifyFireBaseToken,async (req, res) => {
     try {
       const list = await usersCollection
         .find(
@@ -327,7 +327,7 @@ async function run() {
   });
 
   // Check if employee already affiliated
-  app.get("/employee-company", async (req, res) => {
+  app.get("/employee-company",verifyFireBaseToken, async (req, res) => {
     try {
       const { employeeUid } = req.query;
       if (!employeeUid) {
@@ -400,7 +400,7 @@ async function run() {
   // ==========================================================
 
   // HR adds asset (companyId = HR user's _id)
-  app.post("/assets", async (req, res) => {
+  app.post("/assets",verifyFireBaseToken, async (req, res) => {
     try {
       const hrUid = req.body.hrUid || req.body.hruid; // accept both keys
       const { name, type, quantity, image } = req.body;
@@ -436,7 +436,7 @@ async function run() {
 
   // HR lists assets of their own company
   // GET /assets?uid=HR_UID
-  app.get("/assets", async (req, res) => {
+  app.get("/assets",verifyFireBaseToken, async (req, res) => {
     try {
       const { uid } = req.query;
       if (!uid) return res.status(400).json({ message: "uid is required" });
@@ -474,7 +474,7 @@ async function run() {
     }
   });
 
-app.get('/employees/incompany', async (req, res) => {
+app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
   try {
     const { companyId } = req.query;
 
@@ -496,7 +496,7 @@ app.get('/employees/incompany', async (req, res) => {
 
   // Employee loads assets (param version) - FIXED (no double slash)
   // GET /assets/:companyId
-  app.get("/assets/:companyId", async (req, res) => {
+  app.get("/assets/:companyId", verifyFireBaseToken, async (req, res) => {
     try {
       const { companyId } = req.params;
 
@@ -518,7 +518,7 @@ app.get('/employees/incompany', async (req, res) => {
   });
 
   // DELETE /assets/:id?uid=HR_UID
-  app.delete("/assets/:id", async (req, res) => {
+  app.delete("/assets/:id",verifyFireBaseToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { uid } = req.query;
@@ -654,7 +654,7 @@ app.get('/employees/incompany', async (req, res) => {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
-  app.get("/requests/myasset", async (req, res) => {
+  app.get("/requests/myasset",verifyFireBaseToken , async (req, res) => {
     try {
       const { empid } = req.query;
       if (!empid) {
