@@ -685,7 +685,7 @@ const PLANS = {
 
 //make the json from the PREMIUM_PLAN
 
-app.get("/plans", async (req, res) => {
+app.get("/plans",verifyFireBaseToken, async (req, res) => {
   res.json(Object.values(PLANS));
 });
 
@@ -694,7 +694,7 @@ app.get("/plans", async (req, res) => {
 
 //Create the session of stripe
 
-app.post("/create-checkout", async (req, res) => {
+app.post("/create-checkout",verifyFireBaseToken, async (req, res) => {
   try {
     const { uId, plan } = req.body;
 
@@ -738,7 +738,7 @@ app.post("/create-checkout", async (req, res) => {
 
 //set the patch method for the after the successfull payment 
 
-app.patch("/upgrade-after-payment", async (req, res) => {
+app.patch("/upgrade-after-payment",verifyFireBaseToken, async (req, res) => {
   try {
     const { uId, plan } = req.body;
 
