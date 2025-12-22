@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const Stripe = require("stripe");
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -672,6 +674,68 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
+
+
+// SIMPLE PLAN DATA 
+
+const PREMIUM_PLAN = {
+  plan: "premium",
+  priceCents: 1500, 
+  limit: 15,
+};
+
+//make the json from the PREMIUM_PLAN
+
+app.get("/plans/premium", async (req, res) => {
+  res.json({
+    plan: PREMIUM_PLAN.plan,
+    priceCents: PREMIUM_PLAN.priceCents,
+    limit: PREMIUM_PLAN.limit,
+  });
+});
+
+
+//Create the session fot the stripe
+
+app.post("/create-checkout", async (req, res) => {
+  try {
+    const { uId } = req.body;
+
+    if (!uId) return res.status(400).json({ message: "uId is required" });
+
+    // Verify user exists and is HR
+    const hrUser = await usersCollection.findOne({ uid: uId });
+    if (!hrUser) return res.status(404).json({ message: "User not found" });
+    if (hrUser.role !== "hr")
+      return res.status(403).json({ message: "Only HR can upgrade" });
+
+    // Create Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "payment",
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: "Premium Plan Upgrade" },
+            unit_amount: PREMIUM_PLAN.priceCents,
+          },
+          quantity: 1,
+        },
+      ],
+
+      // Redirect back to your frontend
+      // Success page will trigger PATCH upgrade
+      success_url: `http://localhost:5173/payment-success?uId=${uId}`,
+      cancel_url: `http://localhost:5173/payment-cancel`,
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("POST /create-checkout error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
   console.log("MongoDB connected");
 }
