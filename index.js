@@ -740,37 +740,43 @@ app.post("/create-checkout", async (req, res) => {
 
 app.patch("/upgrade-after-payment", async (req, res) => {
   try {
-    const { uId } = req.body;
+    const { uId, plan } = req.body;
+
     if (!uId) return res.status(400).json({ message: "uId is required" });
+    if (!plan) return res.status(400).json({ message: "plan is required" });
+
+    const chosenPlan = PLANS[plan];
+    if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
 
     const hrUser = await usersCollection.findOne({ uid: uId });
     if (!hrUser) return res.status(404).json({ message: "User not found" });
     if (hrUser.role !== "hr")
       return res.status(403).json({ message: "Only HR can upgrade" });
 
-    // prevent double-upgrade
-
-    if (hrUser.subscription === "premium" && hrUser.packageLimit === PREMIUM_PLAN.limit) {
-      return res.json({ message: "Already premium" });
+    // Prevent double-upgrade DB update (safety net)
+    if (
+      hrUser.subscription === chosenPlan.plan &&
+      hrUser.packageLimit === chosenPlan.limit
+    ) {
+      return res.json({ message: `Already on ${chosenPlan.plan}` });
     }
 
     await usersCollection.updateOne(
       { uid: uId },
       {
         $set: {
-          subscription: "premium",
-          packageLimit: PREMIUM_PLAN.limit,
+          subscription: chosenPlan.plan,  // "standard" or "premium"
+          packageLimit: chosenPlan.limit, // 10 or 15
         },
       }
     );
 
-    res.json({ message: "Upgraded to premium" });
+    res.json({ message: `Upgraded to ${chosenPlan.plan}` });
   } catch (err) {
     console.error("PATCH /upgrade-after-payment error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
-
   console.log("MongoDB connected");
 }
 
