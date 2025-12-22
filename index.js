@@ -685,30 +685,32 @@ const PLANS = {
 
 //make the json from the PREMIUM_PLAN
 
-app.get("/plans/premium", async (req, res) => {
-  res.json({
-    plan: PREMIUM_PLAN.plan,
-    priceCents: PREMIUM_PLAN.priceCents,
-    limit: PREMIUM_PLAN.limit,
-  });
+app.get("/plans", async (req, res) => {
+  res.json(Object.values(PLANS));
 });
+
+
 
 
 //Create the session of stripe
 
 app.post("/create-checkout", async (req, res) => {
   try {
-    const { uId } = req.body;
+    const { uId, plan } = req.body;
 
     if (!uId) return res.status(400).json({ message: "uId is required" });
+    if (!plan) return res.status(400).json({ message: "plan is required" });
 
-    // Verify user exists and is HR
+    const chosenPlan = PLANS[plan];
+    if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
+
+    // Verify HR user
     const hrUser = await usersCollection.findOne({ uid: uId });
     if (!hrUser) return res.status(404).json({ message: "User not found" });
     if (hrUser.role !== "hr")
       return res.status(403).json({ message: "Only HR can upgrade" });
 
-    // Create Stripe checkout session
+    // (UX-level block should be frontend; backend still protects DB later)
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
@@ -716,16 +718,13 @@ app.post("/create-checkout", async (req, res) => {
         {
           price_data: {
             currency: "usd",
-            product_data: { name: "Premium Plan Upgrade" },
-            unit_amount: PREMIUM_PLAN.priceCents,
+            product_data: { name: `Upgrade: ${chosenPlan.plan}` },
+            unit_amount: chosenPlan.priceCents,
           },
           quantity: 1,
         },
       ],
-
-      // Redirect back to your frontend
-      // Success page will trigger PATCH upgrade
-      success_url: `http://localhost:5173/payment-success?uId=${uId}`,
+      success_url: `http://localhost:5173/payment-success?uId=${uId}&plan=${chosenPlan.plan}`,
       cancel_url: `http://localhost:5173/payment-cancel`,
     });
 
