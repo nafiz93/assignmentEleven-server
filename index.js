@@ -541,7 +541,7 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
   });
 
   // PATCH /assets/:id?uid=HR_UID
-  app.patch("/assets/:id", async (req, res) => {
+  app.patch("/assets/:id",verifyFireBaseToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { uid } = req.query;
