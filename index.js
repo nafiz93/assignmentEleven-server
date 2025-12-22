@@ -678,10 +678,9 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
 
 // SIMPLE PLAN DATA 
 
-const PREMIUM_PLAN = {
-  plan: "premium",
-  priceCents: 1500, 
-  limit: 15,
+const PLANS = {
+  standard: { plan: "standard", priceCents: 1200, limit: 10 }, // $12, limit 10
+  premium: { plan: "premium", priceCents: 1500, limit: 15 },   // $15, limit 15
 };
 
 //make the json from the PREMIUM_PLAN
@@ -695,7 +694,7 @@ app.get("/plans/premium", async (req, res) => {
 });
 
 
-//Create the session fot the stripe
+//Create the session of stripe
 
 app.post("/create-checkout", async (req, res) => {
   try {
@@ -733,6 +732,42 @@ app.post("/create-checkout", async (req, res) => {
     res.json({ url: session.url });
   } catch (err) {
     console.error("POST /create-checkout error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+//set the patch method for the after the successfull payment 
+
+app.patch("/upgrade-after-payment", async (req, res) => {
+  try {
+    const { uId } = req.body;
+    if (!uId) return res.status(400).json({ message: "uId is required" });
+
+    const hrUser = await usersCollection.findOne({ uid: uId });
+    if (!hrUser) return res.status(404).json({ message: "User not found" });
+    if (hrUser.role !== "hr")
+      return res.status(403).json({ message: "Only HR can upgrade" });
+
+    // prevent double-upgrade
+
+    if (hrUser.subscription === "premium" && hrUser.packageLimit === PREMIUM_PLAN.limit) {
+      return res.json({ message: "Already premium" });
+    }
+
+    await usersCollection.updateOne(
+      { uid: uId },
+      {
+        $set: {
+          subscription: "premium",
+          packageLimit: PREMIUM_PLAN.limit,
+        },
+      }
+    );
+
+    res.json({ message: "Upgraded to premium" });
+  } catch (err) {
+    console.error("PATCH /upgrade-after-payment error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
