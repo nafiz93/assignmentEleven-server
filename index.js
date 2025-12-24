@@ -11,34 +11,35 @@ const port = process.env.PORT || 3000;
 const admin = require("firebase-admin");
 
 // index.js
-const decoded = Buffer.from(process.env.FIREBASE_SERVICE_KEY, "base64").toString("utf8");
+const decoded = Buffer.from(
+  process.env.FIREBASE_SERVICE_KEY,
+  "base64"
+).toString("utf8");
 const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: admin.credential.cert(serviceAccount),
 });
-
 
 app.use(cors());
 app.use(express.json());
 
 const verifyFireBaseToken = async (req, res, next) => {
-    const authorization = req.headers.authorization;
-    if (!authorization) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
-    const token = authorization.split(' ')[1];
-    
-    try {
-        const decoded = await admin.auth().verifyIdToken(token);
-        console.log('inside token', decoded)
-        req.token_email = decoded.email;
-        next();
-    }
-    catch (error) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
-}
+  const authorization = req.headers.authorization;
+  if (!authorization) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  const token = authorization.split(" ")[1];
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    console.log("inside token", decoded);
+    req.token_email = decoded.email;
+    next();
+  } catch (error) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
 app.get("/", (req, res) => res.send("Server running"));
 
@@ -104,7 +105,7 @@ async function run() {
 
         // HR-only
         companyName: role === "hr" ? companyName : undefined,
-     
+
         packageLimit: role === "hr" ? packageLimit ?? 5 : undefined,
         currentEmployees: role === "hr" ? currentEmployees ?? 0 : undefined,
         subscription: role === "hr" ? subscription ?? "basic" : undefined,
@@ -154,7 +155,7 @@ async function run() {
   });
 
   //*******************************approve all API is here ******************************************
-  app.get("/users",verifyFireBaseToken, async (req, res) => {
+  app.get("/users", verifyFireBaseToken, async (req, res) => {
     try {
       const { uid } = req.query;
       if (!uid) return res.status(400).send({ message: "uid is required" });
@@ -169,144 +170,155 @@ async function run() {
     }
   });
 
-
-  app.patch("/users",verifyFireBaseToken, async (req, res) => {   
-  try {
-    const { uid } = req.query;
-    if (!uid) return res.status(400).json({ message: "uid is required" });
-
-    const { name, email, companyLogo } = req.body;
-
-    const updateDoc = {};
-    if (name !== undefined) updateDoc.name = name;
-    if (email !== undefined) updateDoc.email = email;
-    if (companyLogo !== undefined) updateDoc.companyLogo = companyLogo;
-
-    const result = await usersCollection.updateOne(
-      { uid },
-      { $set: updateDoc }
-    );
-
-    return res.json({ message: "User updated", modifiedCount: result.modifiedCount });
-  } catch (err) {
-    console.error("PATCH /users error:", err);
-    return res.status(500).json({ message: "Internal Server Error" });
-  }
-});
-
-
-  app.patch("/requests/:requestId/approve",verifyFireBaseToken, async (req, res) => {
+  app.patch("/users", verifyFireBaseToken, async (req, res) => {
     try {
-      const { requestId } = req.params;
-      const { userId } = req.body; // Firebase UID of HR
+      const { uid } = req.query;
+      if (!uid) return res.status(400).json({ message: "uid is required" });
 
-      if (!requestId)
-        return res.status(400).send({ message: "request id is required" });
-      if (!userId)
-        return res.status(400).send({ message: "user ID is required" });
+      const { name, email, companyLogo } = req.body;
 
-      // Validate requestId ObjectId
-      let requestObjectId;
-      try {
-        requestObjectId = new ObjectId(requestId);
-      } catch {
-        return res.status(400).json({ message: "Invalid requestId" });
-      }
+      const updateDoc = {};
+      if (name !== undefined) updateDoc.name = name;
+      if (email !== undefined) updateDoc.email = email;
+      if (companyLogo !== undefined) updateDoc.companyLogo = companyLogo;
 
-      const hrUser = await usersCollection.findOne({ uid: userId });
-      if (!hrUser) return res.status(400).json({ message: "HR not found" });
-      if (hrUser.role !== "hr")
-        return res.status(400).json({ message: "not HR" });
-
-      // IMPORTANT FIX: companyId must be HR user's Mongo _id, not Firebase UID
-      const requestDoc = await requestsCollection.findOne({
-        _id: requestObjectId,
-        companyId: hrUser._id,
-      });
-
-      if (!requestDoc)
-        return res.status(404).send({ message: "request not found" });
-
-      if (requestDoc.status !== "pending") {
-        return res
-          .status(400)
-          .json({ message: `request already ${requestDoc.status}` });
-      }
-
-      const asset = await assetsCollection.findOne({
-        _id: new ObjectId(requestDoc.assetId),
-        companyId: hrUser._id,
-      });
-
-      if (!asset) {
-        return res.status(404).json({ message: "asset not found" });
-      }
-
-      if (asset.quantity <= 0)
-        return res.status(400).json({ message: "item is out of stock" });
-
-      const exist = await employeeCompanyCollection.findOne({
-        companyId: hrUser._id,
-        employeeUid: requestDoc.employeeUid,
-      });
-
-      if (!exist) {
-        const limit = hrUser.packageLimit ?? 5;
-        const current = hrUser.currentEmployees ?? 0;
-
-        if (current >= limit) {
-          return res.status(400).json({ message: "Employee limit reached" });
-        }
-
-        await employeeCompanyCollection.insertOne({
-          companyId: hrUser._id,
-          employeeUid: requestDoc.employeeUid, // FIX: requestDoc not reqDoc
-          joinedAt: new Date(),
-        });
-
-        await usersCollection.updateOne(
-          { _id: hrUser._id },
-          { $inc: { currentEmployees: 1 } }
-        );
-      }
-
-      // 8) reduce asset qty
-      await assetsCollection.updateOne(
-        { _id: asset._id },
-        { $inc: { quantity: -1 } }
+      const result = await usersCollection.updateOne(
+        { uid },
+        { $set: updateDoc }
       );
 
-      // 9) approve request
-      await requestsCollection.updateOne(
-        { _id: requestDoc._id }, // FIX: requestDoc not reqDoc
-        { $set: { status: "approved", approvedAt: new Date() } }
-      );
-
-      res.json({
-        message: exist ? "Approved (old employee)" : "Approved (new employee)", // FIX: exist not exits
+      return res.json({
+        message: "User updated",
+        modifiedCount: result.modifiedCount,
       });
     } catch (err) {
-      console.error("error is here", err);
-      res.status(500).json({ message: "internal server error" });
+      console.error("PATCH /users error:", err);
+      return res.status(500).json({ message: "Internal Server Error" });
     }
   });
+
+  app.patch(
+    "/requests/:requestId/approve",
+    verifyFireBaseToken,
+    async (req, res) => {
+      try {
+        const { requestId } = req.params;
+        const { userId } = req.body; // Firebase UID of HR
+
+        if (!requestId)
+          return res.status(400).send({ message: "request id is required" });
+        if (!userId)
+          return res.status(400).send({ message: "user ID is required" });
+
+        // Validate requestId ObjectId
+        let requestObjectId;
+        try {
+          requestObjectId = new ObjectId(requestId);
+        } catch {
+          return res.status(400).json({ message: "Invalid requestId" });
+        }
+
+        const hrUser = await usersCollection.findOne({ uid: userId });
+        if (!hrUser) return res.status(400).json({ message: "HR not found" });
+        if (hrUser.role !== "hr")
+          return res.status(400).json({ message: "not HR" });
+
+        // IMPORTANT FIX: companyId must be HR user's Mongo _id, not Firebase UID
+        const requestDoc = await requestsCollection.findOne({
+          _id: requestObjectId,
+          companyId: hrUser._id,
+        });
+
+        if (!requestDoc)
+          return res.status(404).send({ message: "request not found" });
+
+        if (requestDoc.status !== "pending") {
+          return res
+            .status(400)
+            .json({ message: `request already ${requestDoc.status}` });
+        }
+
+        const asset = await assetsCollection.findOne({
+          _id: new ObjectId(requestDoc.assetId),
+          companyId: hrUser._id,
+        });
+
+        if (!asset) {
+          return res.status(404).json({ message: "asset not found" });
+        }
+
+        if (asset.quantity <= 0)
+          return res.status(400).json({ message: "item is out of stock" });
+
+        const exist = await employeeCompanyCollection.findOne({
+          companyId: hrUser._id,
+          employeeUid: requestDoc.employeeUid,
+        });
+
+        if (!exist) {
+          const limit = hrUser.packageLimit ?? 5;
+          const current = hrUser.currentEmployees ?? 0;
+
+          if (current >= limit) {
+            return res.status(400).json({ message: "Employee limit reached" });
+          }
+
+          await employeeCompanyCollection.insertOne({
+            companyId: hrUser._id,
+            employeeUid: requestDoc.employeeUid, // FIX: requestDoc not reqDoc
+            joinedAt: new Date(),
+          });
+
+          await usersCollection.updateOne(
+            { _id: hrUser._id },
+            { $inc: { currentEmployees: 1 } }
+          );
+        }
+
+        // 8) reduce asset qty
+        await assetsCollection.updateOne(
+          { _id: asset._id },
+          { $inc: { quantity: -1 } }
+        );
+
+        // 9) approve request
+        await requestsCollection.updateOne(
+          { _id: requestDoc._id }, // FIX: requestDoc not reqDoc
+          { $set: { status: "approved", approvedAt: new Date() } }
+        );
+
+        res.json({
+          message: exist
+            ? "Approved (old employee)"
+            : "Approved (new employee)", // FIX: exist not exits
+        });
+      } catch (err) {
+        console.error("error is here", err);
+        res.status(500).json({ message: "internal server error" });
+      }
+    }
+  );
 
   // PATCH /requests/:requestId/reject
   // Purpose: HR rejects request (only status update)
-  app.patch("/requests/:requestId/reject",verifyFireBaseToken, async (req, res) => {
-    try {
-      const { requestId } = req.params;
+  app.patch(
+    "/requests/:requestId/reject",
+    verifyFireBaseToken,
+    async (req, res) => {
+      try {
+        const { requestId } = req.params;
 
-      await requestsCollection.updateOne(
-        { _id: new ObjectId(requestId) },
-        { $set: { status: "rejected", rejectedAt: new Date() } }
-      );
+        await requestsCollection.updateOne(
+          { _id: new ObjectId(requestId) },
+          { $set: { status: "rejected", rejectedAt: new Date() } }
+        );
 
-      res.json({ message: "Rejected" });
-    } catch (err) {
-      res.status(500).json({ message: "Server error" });
+        res.json({ message: "Rejected" });
+      } catch (err) {
+        res.status(500).json({ message: "Server error" });
+      }
     }
-  });
+  );
 
   //******************************approve************************************************ */
   // ==========================================================
@@ -314,7 +326,7 @@ async function run() {
   // ==========================================================
 
   // Employee dropdown: show ONLY HR companies
-  app.get("/companies/list",verifyFireBaseToken,async (req, res) => {
+  app.get("/companies/list", verifyFireBaseToken, async (req, res) => {
     try {
       const list = await usersCollection
         .find(
@@ -331,7 +343,7 @@ async function run() {
   });
 
   // Check if employee already affiliated
-  app.get("/employee-company",verifyFireBaseToken, async (req, res) => {
+  app.get("/employee-company", verifyFireBaseToken, async (req, res) => {
     try {
       const { employeeUid } = req.query;
       if (!employeeUid) {
@@ -404,7 +416,7 @@ async function run() {
   // ==========================================================
 
   // HR adds asset (companyId = HR user's _id)
-  app.post("/assets",verifyFireBaseToken, async (req, res) => {
+  app.post("/assets", verifyFireBaseToken, async (req, res) => {
     try {
       const hrUid = req.body.hrUid || req.body.hruid; // accept both keys
       const { name, type, quantity, image } = req.body;
@@ -440,7 +452,7 @@ async function run() {
 
   // HR lists assets of their own company
   // GET /assets?uid=HR_UID
-  app.get("/assets",verifyFireBaseToken, async (req, res) => {
+  app.get("/assets", verifyFireBaseToken, async (req, res) => {
     try {
       const { uid } = req.query;
       if (!uid) return res.status(400).json({ message: "uid is required" });
@@ -478,25 +490,24 @@ async function run() {
     }
   });
 
-app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
-  try {
-    const { companyId } = req.query;
+  app.get("/employees/incompany", verifyFireBaseToken, async (req, res) => {
+    try {
+      const { companyId } = req.query;
 
-    if (!companyId) {
-      return res.status(400).json({ message: "company id is required" });
+      if (!companyId) {
+        return res.status(400).json({ message: "company id is required" });
+      }
+
+      const employees = await employeeCompanyCollection
+        .find({ companyId: new ObjectId(companyId) })
+        .toArray();
+
+      res.json(employees);
+    } catch (err) {
+      console.log("GET /employees/incompany error:", err);
+      res.status(500).json({ message: "internal server error" });
     }
-
-    const employees = await employeeCompanyCollection
-      .find({ companyId: new ObjectId(companyId) })
-      .toArray();
-
-    res.json(employees);
-  } catch (err) {
-    console.log("GET /employees/incompany error:", err);
-    res.status(500).json({ message: "internal server error" });
-  }
-});
-
+  });
 
   // Employee loads assets (param version) - FIXED (no double slash)
   // GET /assets/:companyId
@@ -522,7 +533,7 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
   });
 
   // DELETE /assets/:id?uid=HR_UID
-  app.delete("/assets/:id",verifyFireBaseToken, async (req, res) => {
+  app.delete("/assets/:id", verifyFireBaseToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { uid } = req.query;
@@ -545,7 +556,7 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
   });
 
   // PATCH /assets/:id?uid=HR_UID
-  app.patch("/assets/:id",verifyFireBaseToken, async (req, res) => {
+  app.patch("/assets/:id", verifyFireBaseToken, async (req, res) => {
     try {
       const { id } = req.params;
       const { uid } = req.query;
@@ -658,7 +669,7 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
       res.status(500).json({ message: "Internal Server Error" });
     }
   });
-  app.get("/requests/myasset",verifyFireBaseToken , async (req, res) => {
+  app.get("/requests/myasset", verifyFireBaseToken, async (req, res) => {
     try {
       const { empid } = req.query;
       if (!empid) {
@@ -666,7 +677,7 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
       }
 
       const list = await requestsCollection
-        .find({employeeUid:empid})
+        .find({ employeeUid: empid })
         .sort({ createdAt: -1 })
         .toArray();
 
@@ -677,108 +688,103 @@ app.get('/employees/incompany',verifyFireBaseToken, async (req, res) => {
     }
   });
 
+  // SIMPLE PLAN DATA
 
-// SIMPLE PLAN DATA 
+  const PLANS = {
+    standard: { plan: "standard", priceCents: 1200, limit: 10 }, // $12, limit 10
+    premium: { plan: "premium", priceCents: 1500, limit: 15 }, // $15, limit 15
+  };
 
-const PLANS = {
-  standard: { plan: "standard", priceCents: 1200, limit: 10 }, // $12, limit 10
-  premium: { plan: "premium", priceCents: 1500, limit: 15 },   // $15, limit 15
-};
+  //make the json from the PREMIUM_PLAN
 
-//make the json from the PREMIUM_PLAN
+  app.get("/plans", async (req, res) => {
+    res.json(Object.values(PLANS));
+  });
 
-app.get("/plans", async (req, res) => {
-  res.json(Object.values(PLANS));
-});
+  //Create the session of stripe
 
+  app.post("/create-checkout", async (req, res) => {
+    try {
+      const { uId, plan } = req.body;
 
+      if (!uId) return res.status(400).json({ message: "uId is required" });
+      if (!plan) return res.status(400).json({ message: "plan is required" });
 
+      const chosenPlan = PLANS[plan];
+      if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
 
-//Create the session of stripe
+      // Verify HR user
+      const hrUser = await usersCollection.findOne({ uid: uId });
+      if (!hrUser) return res.status(404).json({ message: "User not found" });
+      if (hrUser.role !== "hr")
+        return res.status(403).json({ message: "Only HR can upgrade" });
 
-app.post("/create-checkout", async (req, res) => {
-  try {
-    const { uId, plan } = req.body;
-
-    if (!uId) return res.status(400).json({ message: "uId is required" });
-    if (!plan) return res.status(400).json({ message: "plan is required" });
-
-    const chosenPlan = PLANS[plan];
-    if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
-
-    // Verify HR user
-    const hrUser = await usersCollection.findOne({ uid: uId });
-    if (!hrUser) return res.status(404).json({ message: "User not found" });
-    if (hrUser.role !== "hr")
-      return res.status(403).json({ message: "Only HR can upgrade" });
-
-    // (UX-level block should be frontend; backend still protects DB later)
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: `Upgrade: ${chosenPlan.plan}` },
-            unit_amount: chosenPlan.priceCents,
+      // (UX-level block should be frontend; backend still protects DB later)
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `Upgrade: ${chosenPlan.plan}` },
+              unit_amount: chosenPlan.priceCents,
+            },
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
-      success_url: `http://localhost:5173/payment-success?uId=${uId}&plan=${chosenPlan.plan}`,
-      cancel_url: `http://localhost:5173/payment-cancel`,
-    });
+        ],
+        success_url: `https://assetverse-1958a.web.app/payment-success?uId=${uId}&plan=${chosenPlan.plan}`,
+        cancel_url: `https://assetverse-1958a.web.app/payment-cancel`,
+      });
 
-    res.json({ url: session.url });
-  } catch (err) {
-    console.error("POST /create-checkout error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-
-//set the patch method for the after the successfull payment 
-
-app.patch("/upgrade-after-payment",async (req, res) => {
-  try {
-    const { uId, plan } = req.body;
-
-    if (!uId) return res.status(400).json({ message: "uId is required" });
-    if (!plan) return res.status(400).json({ message: "plan is required" });
-
-    const chosenPlan = PLANS[plan];
-    if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
-
-    const hrUser = await usersCollection.findOne({ uid: uId });
-    if (!hrUser) return res.status(404).json({ message: "User not found" });
-    if (hrUser.role !== "hr")
-      return res.status(403).json({ message: "Only HR can upgrade" });
-
-    // Prevent double-upgrade DB update (safety net)
-    if (
-      hrUser.subscription === chosenPlan.plan &&
-      hrUser.packageLimit === chosenPlan.limit
-    ) {
-      return res.json({ message: `Already on ${chosenPlan.plan}` });
+      res.json({ url: session.url });
+    } catch (err) {
+      console.error("POST /create-checkout error:", err);
+      res.status(500).json({ message: "Server error" });
     }
+  });
 
-    await usersCollection.updateOne(
-      { uid: uId },
-      {
-        $set: {
-          subscription: chosenPlan.plan,  // "standard" or "premium"
-          packageLimit: chosenPlan.limit, // 10 or 15
-        },
+  //set the patch method for the after the successfull payment
+
+  app.patch("/upgrade-after-payment", async (req, res) => {
+    try {
+      const { uId, plan } = req.body;
+
+      if (!uId) return res.status(400).json({ message: "uId is required" });
+      if (!plan) return res.status(400).json({ message: "plan is required" });
+
+      const chosenPlan = PLANS[plan];
+      if (!chosenPlan) return res.status(400).json({ message: "Invalid plan" });
+
+      const hrUser = await usersCollection.findOne({ uid: uId });
+      if (!hrUser) return res.status(404).json({ message: "User not found" });
+      if (hrUser.role !== "hr")
+        return res.status(403).json({ message: "Only HR can upgrade" });
+
+      // Prevent double-upgrade DB update (safety net)
+      if (
+        hrUser.subscription === chosenPlan.plan &&
+        hrUser.packageLimit === chosenPlan.limit
+      ) {
+        return res.json({ message: `Already on ${chosenPlan.plan}` });
       }
-    );
 
-    res.json({ message: `Upgraded to ${chosenPlan.plan}` });
-  } catch (err) {
-    console.error("PATCH /upgrade-after-payment error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+      await usersCollection.updateOne(
+        { uid: uId },
+        {
+          $set: {
+            subscription: chosenPlan.plan, // "standard" or "premium"
+            packageLimit: chosenPlan.limit, // 10 or 15
+          },
+        }
+      );
+
+      res.json({ message: `Upgraded to ${chosenPlan.plan}` });
+    } catch (err) {
+      console.error("PATCH /upgrade-after-payment error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  });
   console.log("MongoDB connected");
 }
 
