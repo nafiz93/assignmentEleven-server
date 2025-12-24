@@ -717,7 +717,7 @@ async function run() {
       const hrUser = await usersCollection.findOne({ uid: uId });
       if (!hrUser) return res.status(404).json({ message: "User not found" });
       if (hrUser.role !== "hr")
-        return res.status(403).json({ message: "Only HR can upgrade" });
+        return res.status(403).json({ message: "Only HR can upgrade package" });
 
       // (UX-level block should be frontend; backend still protects DB later)
       const session = await stripe.checkout.sessions.create({
